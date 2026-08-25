@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "zan"
+version = "0.1.0"
+description = "A Flask-compatible Python web framework powered by a Rust HTTP core"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "RaysunKR" }]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+]
+
+[project.optional-dependencies]
+templates = ["jinja2>=3.0"]
+
+[tool.maturin]
+python-source = "."
+module-name = "zan._zan"

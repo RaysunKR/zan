@@ -1,0 +1,20 @@
+/target
+__pycache__/
+*.pyc
+# Rust / Python extension build artifacts
+*.so
+*.pyd
+*.pdb
+/target
+/dist
+/build
+.venv/
+.pytest_cache/
+dist/
+build/
+node_modules/
+blog/frontend/node_modules/
+
+# Runtime / generated files
+*.db
+blog/backend/static/

@@ -1,0 +1,18 @@
+[package]
+name = "zan-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_zan"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["abi3-py38"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "io-util", "sync", "macros", "fs"] }
+httparse = "1"
+percent-encoding = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
