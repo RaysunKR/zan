@@ -26,8 +26,8 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.event_name == 'release' && 'pypi' || inputs.target }}
-      url: ${{ github.event_name == 'release' && 'https://pypi.org/p/zan/' || 'https://test.pypi.org/p/zan/' }}
+      name: ${{ (github.event_name == 'release' || inputs.target == 'pypi') && 'pypi' || 'testpypi' }}
+      url: ${{ (github.event_name == 'release' || inputs.target == 'pypi') && 'https://pypi.org/p/zan/' || 'https://test.pypi.org/p/zan/' }}
     permissions:
       id-token: write
     steps:
@@ -40,5 +40,5 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
-          repository-url: ${{ github.event_name == 'release' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+          repository-url: ${{ (github.event_name == 'release' || inputs.target == 'pypi') && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
           skip-existing: true
