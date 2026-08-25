@@ -33,9 +33,9 @@ jobs:
         run: |
           pip install dist/zan-*-cp38-abi3-manylinux*.whl
           pip install pytest jinja2
+          python -c "import zan, glob, shutil, os; src = glob.glob(os.path.join(os.path.dirname(zan.__file__), '_zan*'))[0]; shutil.copy(src, 'zan/'); print('copied', src, 'to zan/')"
       - name: Run tests
-        working-directory: /tmp
-        run: pytest ${{ github.workspace }}/tests/ -q
+        run: pytest tests/ -q
 
   windows:
     runs-on: windows-latest
