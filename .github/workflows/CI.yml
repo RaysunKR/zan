@@ -68,25 +68,6 @@ jobs:
           name: wheels-windows-x64
           path: dist/*
 
-  macos-x86_64:
-    runs-on: macos-13
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: x86_64-apple-darwin
-          args: --release --out dist --find-interpreter
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-macos-x86_64
-          path: dist/*
-
   macos-aarch64:
     runs-on: macos-14
     needs: test
