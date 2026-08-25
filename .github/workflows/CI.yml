@@ -33,7 +33,7 @@ jobs:
         run: |
           pip install dist/zan-*-cp38-abi3-manylinux*.whl
           pip install pytest jinja2
-          python -c "import zan, glob, shutil, os; src = glob.glob(os.path.join(os.path.dirname(zan.__file__), '_zan*'))[0]; shutil.copy(src, 'zan/'); print('copied', src, 'to zan/')"
+          unzip -o dist/zan-*-cp38-abi3-manylinux*.whl 'zan/_zan*.so' -d .
       - name: Run tests
         run: pytest tests/ -q
 
