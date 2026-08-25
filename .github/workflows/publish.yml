@@ -4,6 +4,15 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'PyPI target'
+        required: true
+        type: choice
+        options:
+          - testpypi
+          - pypi
+        default: testpypi
 
 permissions:
   contents: read
@@ -16,7 +25,9 @@ jobs:
     name: Publish to PyPI
     needs: ci
     runs-on: ubuntu-latest
-    environment: release
+    environment:
+      name: ${{ github.event_name == 'release' && 'pypi' || inputs.target }}
+      url: ${{ github.event_name == 'release' && 'https://pypi.org/p/zan/' || 'https://test.pypi.org/p/zan/' }}
     permissions:
       id-token: write
     steps:
@@ -26,7 +37,8 @@ jobs:
           pattern: wheels-*
           merge-multiple: true
       - name: Publish to PyPI
-        uses: PyO3/maturin-action@v1
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          command: upload
-          args: --non-interactive --skip-existing dist/*
+          packages-dir: dist/
+          repository-url: ${{ github.event_name == 'release' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+          skip-existing: true
