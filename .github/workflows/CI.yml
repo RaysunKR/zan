@@ -22,7 +22,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64
-          manylinux: 2_28
+          manylinux: 2014
           args: --release --out dist --find-interpreter
           sdist: true
       - name: Upload wheels
