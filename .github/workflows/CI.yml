@@ -21,11 +21,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Python dependencies
-        run: pip install maturin pytest jinja2
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install maturin pytest jinja2
       - name: Build and install extension
-        run: python -m maturin develop --release
+        run: .venv/bin/python -m maturin develop --release
       - name: Run tests
-        run: pytest tests/ -q
+        run: .venv/bin/pytest tests/ -q
 
   linux:
     runs-on: ubuntu-latest
