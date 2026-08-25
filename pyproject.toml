@@ -10,11 +10,30 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "RaysunKR" }]
+keywords = ["web", "framework", "flask", "rust", "http", "server"]
 classifiers = [
-    "Programming Language :: Rust",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+    "Programming Language :: Rust",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+
+[project.urls]
+Homepage = "https://github.com/RaysunKR/zan"
+Repository = "https://github.com/RaysunKR/zan"
+Documentation = "https://github.com/RaysunKR/zan/tree/main/docs"
+Issues = "https://github.com/RaysunKR/zan/issues"
 
 [project.optional-dependencies]
 templates = ["jinja2>=3.0"]

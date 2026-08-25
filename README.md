@@ -26,10 +26,38 @@ if __name__ == "__main__":
 Replace `from flask import ...` with `from zan import ...` and the rest of your code stays the same.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/zan.svg)](https://pypi.org/project/zan/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 
 [中文 README](README.zh-CN.md)
+
+## Install
+
+zan provides pre-built wheels for Windows, macOS, and Linux. No Rust toolchain is required:
+
+```bash
+pip install zan
+```
+
+Optional template support:
+
+```bash
+pip install zan[templates]
+```
+
+To build from source, see [Building from source](#building-from-source) below.
+
+## Building from source
+
+You need the Rust toolchain (`rustc` 1.75+) and Python 3.8+:
+
+```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install maturin pytest jinja2
+maturin develop --release
+pytest tests/ -q
+```
 
 ## Features
 

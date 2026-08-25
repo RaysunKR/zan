@@ -26,12 +26,29 @@ if __name__ == "__main__":
 把 `from flask import ...` 改成 `from zan import ...`，其余代码不用动。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/zan.svg)](https://pypi.org/project/zan/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 
 [English README](README.md)
 
-## 安装与构建
+## 安装
+
+zan 为 Windows、macOS 和 Linux 提供预编译 wheel，无需安装 Rust 工具链：
+
+```bash
+pip install zan
+```
+
+可选模板支持：
+
+```bash
+pip install zan[templates]
+```
+
+如需从源码构建，见下方「从源码构建」。
+
+## 从源码构建
 
 需要 Rust 工具链（`rustc` 1.75+）与 Python 3.8+：
 
