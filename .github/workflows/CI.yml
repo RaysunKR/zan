@@ -34,7 +34,8 @@ jobs:
           pip install dist/zan-*-cp38-abi3-manylinux*.whl
           pip install pytest jinja2
       - name: Run tests
-        run: pytest tests/ -q
+        working-directory: /tmp
+        run: pytest ${{ github.workspace }}/tests/ -q
 
   windows:
     runs-on: windows-latest
