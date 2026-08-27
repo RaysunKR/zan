@@ -39,13 +39,14 @@ for server_port in "${servers[@]}"; do
     for test_spec in "${tests[@]}"; do
         name="${test_spec%%:*}"
         path="${test_spec##*:}"
+        path="${path#* }"  # strip HTTP method
 
         rps_values=()
         for round in 1 2 3; do
             out="$OUTDIR/${server}_${name}_r${round}.txt"
             if [ "$name" = "plaintext" ]; then
-                wrk -t $(nproc) -c $CONNECTIONS -d ${DURATION}s --pipeline 16 \
-                    "http://127.0.0.1:$port$path" > "$out"
+                wrk -t $(nproc) -c $CONNECTIONS -d ${DURATION}s \
+                    "http://127.0.0.1:$port$path" -s pipeline.lua -- 16 > "$out"
             else
                 wrk -t $(nproc) -c $CONNECTIONS -d ${DURATION}s \
                     "http://127.0.0.1:$port$path" > "$out"
