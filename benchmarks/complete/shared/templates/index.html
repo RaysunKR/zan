@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Benchmark Service{% endblock %}
+{% block content %}
+<h1>Benchmark Service</h1>
+<ul>
+    <li><a href="/plaintext">/plaintext</a></li>
+    <li><a href="/json">/json</a></li>
+    <li><a href="/db">/db</a></li>
+    <li><a href="/queries?queries=10">/queries</a></li>
+    <li><a href="/updates?queries=10">/updates</a></li>
+    <li><a href="/fortunes">/fortunes</a></li>
+    <li><a href="/demo/template">/demo/template</a></li>
+    <li><a href="/demo/session">/demo/session</a></li>
+    <li><a href="/api/ping">/api/ping</a></li>
+</ul>
+{% endblock %}
