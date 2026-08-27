@@ -21,6 +21,13 @@ pub enum Conv {
     Any(Vec<String>),
 }
 
+#[derive(Clone)]
+pub struct NativeResponse {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
 pub struct Route {
     /// kept for debugging/`url_map` parity
     #[allow(dead_code)]
@@ -31,6 +38,12 @@ pub struct Route {
     pub auto_options: bool,
     /// whether the rule itself ends with `/` (strict-slash semantics)
     pub strict_trailing: bool,
+    /// Optional fully-Rust response; when present the route is served without Python.
+    pub native_response: Option<NativeResponse>,
+    /// When true and no native response, Rust uses the fast Python pipeline.
+    pub fast: bool,
+    /// Optional fully-Rust dynamic handler identifier (e.g. "db", "queries").
+    pub native_handler: Option<String>,
 }
 
 #[derive(Default)]
@@ -179,6 +192,9 @@ impl Router {
             view,
             auto_options,
             strict_trailing: rule.len() > 1 && rule.ends_with('/'),
+            native_response: None,
+            fast: false,
+            native_handler: None,
         });
 
         let mut node = &mut self.root;
@@ -230,6 +246,48 @@ impl Router {
             node.route = Some(idx);
         }
         Ok(())
+    }
+
+    /// Attach a fully-Rust response to an existing route.
+    pub fn set_native_response(
+        &mut self,
+        rule: &str,
+        method: &str,
+        native: NativeResponse,
+    ) -> Result<(), String> {
+        let method = method.to_ascii_uppercase();
+        for route in self.routes.iter_mut() {
+            if route.rule == rule && route.methods.iter().any(|m| m.eq_ignore_ascii_case(&method)) {
+                route.native_response = Some(native);
+                return Ok(());
+            }
+        }
+        Err(format!("no route matching `{rule}` with method `{method}`"))
+    }
+
+    /// Mark an existing route as eligible for the fast Python pipeline.
+    pub fn set_fast(&mut self, rule: &str, method: &str) -> Result<(), String> {
+        let method = method.to_ascii_uppercase();
+        for route in self.routes.iter_mut() {
+            if route.rule == rule && route.methods.iter().any(|m| m.eq_ignore_ascii_case(&method)) {
+                route.fast = true;
+                return Ok(());
+            }
+        }
+        Err(format!("no route matching `{rule}` with method `{method}`"))
+    }
+
+    /// Attach a fully-Rust dynamic handler to an existing route.
+    pub fn set_native_handler(&mut self, rule: &str, method: &str, handler_id: String,
+    ) -> Result<(), String> {
+        let method = method.to_ascii_uppercase();
+        for route in self.routes.iter_mut() {
+            if route.rule == rule && route.methods.iter().any(|m| m.eq_ignore_ascii_case(&method)) {
+                route.native_handler = Some(handler_id);
+                return Ok(());
+            }
+        }
+        Err(format!("no route matching `{rule}` with method `{method}`"))
     }
 
     /// Find matching candidates for a decoded-check path. `raw_path` is the

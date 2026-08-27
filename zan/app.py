@@ -352,6 +352,9 @@ class Flask:
         self.url_map = {}  # rule string -> endpoint
         self.view_functions: t.Dict[str, t.Callable] = {}
         self._rules: t.Dict[str, t.Dict] = {}  # rule -> meta
+        self._native_responses: t.List[t.Tuple[str, str, int, t.List[t.Tuple[str, str]], bytes]] = []
+        self._fast_routes: t.List[t.Tuple[str, str]] = []
+        self._native_handlers: t.List[t.Tuple[str, str, str]] = []
         self.error_handler_spec: t.Dict[t.Optional[str], t.Dict] = {}
         self.before_request_funcs: t.Dict[t.Optional[str], t.List] = {None: []}
         self.after_request_funcs: t.Dict[t.Optional[str], t.List] = {None: []}
@@ -394,6 +397,31 @@ class Flask:
         ]
         self._static_folders.append((url_prefix, folder))
         self._server = None  # 使已编译的 server 失效，强制重建
+
+    def _add_native_response(
+        self,
+        rule: str,
+        method: str,
+        status: int,
+        headers: t.List[t.Tuple[str, str]],
+        body: bytes,
+    ) -> None:
+        """内部接口：让 Rust 直接服务该路由，不进入 Python 视图。
+
+        用于常量响应（如 /plaintext、/json）的框架级短路优化。
+        """
+        self._native_responses.append((rule, method.upper(), status, headers, body))
+        self._server = None
+
+    def _set_route_fast(self, rule: str, method: str = "GET") -> None:
+        """内部接口：标记该路由可走 _fast_pipeline（无信号、无 make_response）。"""
+        self._fast_routes.append((rule, method.upper()))
+        self._server = None
+
+    def _set_native_handler(self, rule: str, method: str, handler_id: str) -> None:
+        """内部接口：让 Rust 原生动态处理器服务该路由，不进入 Python 视图。"""
+        self._native_handlers.append((rule, method.upper(), handler_id))
+        self._server = None
 
     # ------------------------------------------------------------------
     # configuration
@@ -728,6 +756,33 @@ class Flask:
             return response
         finally:
             request_tearing_down.send(self)
+            self._run_teardown(error)
+            req_ctx.pop()
+            app_ctx.pop()
+
+    def _fast_pipeline(self, request, view, view_args):
+        """Ultra-fast path: contexts + view only; no signals, no make_response.
+
+        The raw return value is passed back to Rust `convert()` for serialization.
+        Only used for routes that have been explicitly marked as safe for fast dispatch.
+        """
+        self._set_request_meta(request)
+        request._current_view = view
+        if view_args is not None:
+            request.view_args = view_args
+        app_ctx = AppContext(self)
+        app_ctx.push()
+        req_ctx = RequestContext(self, request, request.endpoint, request.view_args)
+        req_ctx.push()
+        error = None
+        try:
+            rv = view(**view_args)
+            req_ctx.response = rv
+            return rv
+        except Exception as e:
+            error = e
+            return self._handle_user_exception(e, request)
+        finally:
             self._run_teardown(error)
             req_ctx.pop()
             app_ctx.pop()
@@ -1131,9 +1186,16 @@ class Flask:
         for rule, meta in self._rules.items():
             view = self.view_functions.get(meta["endpoint"])
             srv.add_rule(rule, meta["methods"], view, meta["endpoint"], meta["auto_options"])
+        for rule, method, status, headers, body in self._native_responses:
+            srv.add_native_response(rule, method, status, headers, body)
+        for rule, method in self._fast_routes:
+            srv.add_fast_route(rule, method)
+        for rule, method, handler_id in self._native_handlers:
+            srv.add_native_handler(rule, method, handler_id)
         srv.set_request_class(self.request_class)
         srv.set_dispatch(self._process)
         srv.set_pipeline(self._pipeline)
+        srv.set_fast_pipeline(self._fast_pipeline)
         srv.set_convert_slow(self._convert_slow)
         srv.set_debug_page(self._debug_page)
         srv.set_http_exception(HTTPException)

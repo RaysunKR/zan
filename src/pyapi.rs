@@ -36,7 +36,7 @@ use crate::router::Router;
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// 进程级唯一的多线程 tokio 运行时；worker 数 = CPU 核数。
-fn runtime() -> &'static tokio::runtime::Runtime {
+pub fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
         let cpus = std::thread::available_parallelism()
             .map(|n| n.get())
@@ -104,10 +104,14 @@ fn spawn_server(
 pub struct Server {
     /// 规则原文，按需重新编译为 trie。
     specs: Vec<RuleSpec>,
+    native_specs: Vec<NativeSpec>,
+    fast_specs: Vec<FastSpec>,
+    native_handler_specs: Vec<NativeHandlerSpec>,
     built: Option<Arc<Router>>,
     static_cfg: Vec<(String, PathBuf)>,
     dispatch: Option<Py<PyAny>>,
     pipeline: Option<Py<PyAny>>,
+    fast_pipeline: Option<Py<PyAny>>,
     req_cls: Option<Py<PyAny>>,
     convert_slow: Option<Py<PyAny>>,
     debug_page: Option<Py<PyAny>>,
@@ -129,16 +133,39 @@ struct RuleSpec {
     auto_options: bool,
 }
 
+struct NativeSpec {
+    rule: String,
+    method: String,
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+struct FastSpec {
+    rule: String,
+    method: String,
+}
+
+struct NativeHandlerSpec {
+    rule: String,
+    method: String,
+    handler_id: String,
+}
+
 #[pymethods]
 impl Server {
     #[new]
     fn new() -> Self {
         Server {
             specs: Vec::new(),
+            native_specs: Vec::new(),
+            fast_specs: Vec::new(),
+            native_handler_specs: Vec::new(),
             built: None,
             static_cfg: Vec::new(),
             dispatch: None,
             pipeline: None,
+            fast_pipeline: None,
             req_cls: None,
             convert_slow: None,
             debug_page: None,
@@ -171,6 +198,26 @@ impl Server {
         Ok(())
     }
 
+    #[pyo3(signature = (rule, method, status, headers, body))]
+    fn add_native_response(
+        &mut self,
+        rule: String,
+        method: String,
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    ) -> PyResult<()> {
+        self.native_specs.push(NativeSpec {
+            rule,
+            method,
+            status,
+            headers,
+            body,
+        });
+        self.built = None;
+        Ok(())
+    }
+
     fn rule_count(&self) -> usize {
         self.specs.len()
     }
@@ -190,6 +237,33 @@ impl Server {
 
     fn set_pipeline(&mut self, f: Py<PyAny>) {
         self.pipeline = Some(f);
+    }
+
+    fn set_fast_pipeline(&mut self, f: Py<PyAny>) {
+        self.fast_pipeline = Some(f);
+    }
+
+    #[pyo3(signature = (rule, method))]
+    fn add_fast_route(
+        &mut self,
+        rule: String,
+        method: String,
+    ) -> PyResult<()> {
+        self.fast_specs.push(FastSpec { rule, method });
+        self.built = None;
+        Ok(())
+    }
+
+    #[pyo3(signature = (rule, method, handler_id))]
+    fn add_native_handler(
+        &mut self,
+        rule: String,
+        method: String,
+        handler_id: String,
+    ) -> PyResult<()> {
+        self.native_handler_specs.push(NativeHandlerSpec { rule, method, handler_id });
+        self.built = None;
+        Ok(())
     }
 
     fn set_convert_slow(&mut self, f: Py<PyAny>) {
@@ -448,7 +522,32 @@ impl Server {
             let mut router = Router::new();
             for spec in &self.specs {
                 router
-                    .add(&spec.rule, spec.methods.clone(), spec.view.clone_ref(py), spec.endpoint.clone(), spec.auto_options)
+                    .add(&spec.rule,
+                        spec.methods.clone(),
+                        spec.view.clone_ref(py),
+                        spec.endpoint.clone(),
+                        spec.auto_options)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
+            for spec in &self.native_specs {
+                let native = crate::router::NativeResponse {
+                    status: spec.status,
+                    headers: spec.headers.clone(),
+                    body: spec.body.clone(),
+                };
+                router
+                    .set_native_response(&spec.rule,&spec.method,
+                        native)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
+            for spec in &self.fast_specs {
+                router
+                    .set_fast(&spec.rule, &spec.method)
+                    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+            }
+            for spec in &self.native_handler_specs {
+                router
+                    .set_native_handler(&spec.rule, &spec.method, spec.handler_id.clone())
                     .map_err(pyo3::exceptions::PyValueError::new_err)?;
             }
             self.built = Some(Arc::new(router));
@@ -463,6 +562,7 @@ impl Server {
         let pipeline = self.pipeline.as_ref().map(|p| p.clone_ref(py)).ok_or_else(|| {
             PyRuntimeError::new_err("pipeline not configured (call set_pipeline)")
         })?;
+        let fast_pipeline = self.fast_pipeline.as_ref().map(|p| p.clone_ref(py));
         let convert_slow = self.convert_slow.as_ref().map(|p| p.clone_ref(py)).ok_or_else(|| {
             PyRuntimeError::new_err("converter not configured (call set_convert_slow)")
         })?;
@@ -489,6 +589,7 @@ impl Server {
             cc_max_age: self.cc_max_age,
             dispatch,
             pipeline,
+            fast_pipeline,
             req_cls,
             convert_slow,
             debug_page,

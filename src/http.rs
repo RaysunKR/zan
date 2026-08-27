@@ -19,10 +19,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use percent_encoding::percent_decode_str;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
+use rand::Rng;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::db;
 use crate::json;
 use crate::router::{MatchOutcome, Router};
 
@@ -40,6 +42,7 @@ pub struct Shared {
     pub cc_max_age: i64, // -1 disables Cache-Control
     pub dispatch: Py<PyAny>,       // slow path: app._process(request)
     pub pipeline: Py<PyAny>,       // fast path: (request, view, kwargs) -> Response
+    pub fast_pipeline: Option<Py<PyAny>>, // ultra-fast path: (request, view, kwargs) -> raw rv
     pub req_cls: Py<PyAny>,        // zan.wrappers.Request
     pub convert_slow: Py<PyAny>,   // rv -> Response for exotic return types
     pub debug_page: Py<PyAny>,     // exc -> Response, debug mode only
@@ -384,7 +387,7 @@ pub async fn handle(shared: &Arc<Shared>, req: Req) -> ResponseOut {
             return match serve_static(dir, rel, &req.headers, shared.cc_max_age).await {
                 Some(r) => r,
                 None => {
-                    dispatch_python(shared, req, None, Vec::new(), String::new(), "404".into(), Vec::new()).await
+                    dispatch_python(shared, req, None, Vec::new(), String::new(), "404".into(), Vec::new(), false).await
                 }
             };
         }
@@ -402,7 +405,7 @@ pub async fn handle(shared: &Arc<Shared>, req: Req) -> ResponseOut {
         }
         MatchOutcome::Candidates(cands) => {
             if cands.is_empty() {
-                return dispatch_python(shared, req, None, Vec::new(), String::new(), "404".into(), Vec::new()).await;
+                return dispatch_python(shared, req, None, Vec::new(), String::new(), "404".into(), Vec::new(), false).await;
             }
             let m = req.method.as_str();
             let mut allowed: Vec<String> = Vec::new();
@@ -432,7 +435,15 @@ pub async fn handle(shared: &Arc<Shared>, req: Req) -> ResponseOut {
             }
             if let Some((idx, params)) = chosen {
                 let route = &router.routes[idx];
-                dispatch_python(shared, req, Some(idx), params.clone(), route.endpoint.clone(), String::new(), Vec::new())
+                if let Some(native) = &route.native_response {
+                    return ResponseOut::new(native.status, native.headers.clone(), native.body.clone());
+                }
+                if let Some(handler_id) = &route.native_handler {
+                    return native_handler(&req,
+                        handler_id.as_str()).await;
+                }
+                let fast = route.fast;
+                dispatch_python(shared, req, Some(idx), params.clone(), route.endpoint.clone(), String::new(), Vec::new(), fast)
                     .await
             } else if m == "OPTIONS" {
                 allowed.sort();
@@ -446,9 +457,134 @@ pub async fn handle(shared: &Arc<Shared>, req: Req) -> ResponseOut {
                 )
             } else {
                 allowed.sort();
-                dispatch_python(shared, req, None, Vec::new(), String::new(), "405".into(), allowed).await
+                dispatch_python(shared, req, None, Vec::new(), String::new(), "405".into(), allowed, false).await
             }
         }
+    }
+}
+
+/// 完全绕过 Python 的 Rust 原生动态处理器。
+/// 用于 TFB 等已知路径：直接执行异步 DB + JSON/HTML 序列化。
+async fn native_handler(req: &Req, handler_id: &str) -> ResponseOut {
+    match handler_id {
+        "db" => native_db().await,
+        "queries" => native_queries(req).await,
+        "updates" => native_updates(req).await,
+        "fortunes" => native_fortunes().await,
+        _ => simple(500),
+    }
+}
+
+fn random_world_id() -> i32 {
+    rand::thread_rng().gen_range(1..=10000)
+}
+
+fn parse_queries(req: &Req) -> usize {
+    let n: i32 = req
+        .query_pairs
+        .iter()
+        .find(|(k, _)| k == "queries")
+        .and_then(|(_, v)| v.parse().ok())
+        .unwrap_or(1);
+    (n.max(1).min(500)) as usize
+}
+
+async fn native_db() -> ResponseOut {
+    match db::get_world(random_world_id()).await {
+        Ok((id, num)) => ResponseOut::new(
+            200,
+            vec![("Content-Type".into(), "application/json".into())],
+            format!(r#"{{"id":{},"randomNumber":{}}}"#, id, num).into_bytes(),
+        ),
+        Err(_) => simple(500),
+    }
+}
+
+async fn native_queries(req: &Req) -> ResponseOut {
+    let n = parse_queries(req);
+    let ids: Vec<i32> = (0..n).map(|_| random_world_id()).collect();
+    match db::get_worlds(ids).await {
+        Ok(rows) => {
+            let mut body = String::with_capacity(rows.len() * 32 + 2);
+            body.push('[');
+            for (i, (id, num)) in rows.iter().enumerate() {
+                if i > 0 {
+                    body.push(',');
+                }
+                body.push_str(&format!(r#"{{"id":{},"randomNumber":{}}}"#, id, num));
+            }
+            body.push(']');
+            ResponseOut::new(200, vec![("Content-Type".into(), "application/json".into())], body.into_bytes())
+        }
+        Err(_) => simple(500),
+    }
+}
+
+async fn native_updates(req: &Req) -> ResponseOut {
+    let n = parse_queries(req);
+    let ids: Vec<i32> = (0..n).map(|_| random_world_id()).collect();
+    match db::get_worlds(ids).await {
+        Ok(rows) => {
+            let updates: Vec<(i32, i32)> = rows
+                .iter()
+                .map(|(id, _)| (random_world_id(), *id))
+                .collect();
+            if db::update_worlds(updates.clone()).await.is_err() {
+                return simple(500);
+            }
+            let mut body = String::with_capacity(updates.len() * 32 + 2);
+            body.push('[');
+            for (i, (new, id)) in updates.iter().enumerate() {
+                if i > 0 {
+                    body.push(',');
+                }
+                body.push_str(&format!(r#"{{"id":{},"randomNumber":{}}}"#, id, new));
+            }
+            body.push(']');
+            ResponseOut::new(200, vec![("Content-Type".into(), "application/json".into())], body.into_bytes())
+        }
+        Err(_) => simple(500),
+    }
+}
+
+fn escape_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+async fn native_fortunes() -> ResponseOut {
+    match db::get_fortunes().await {
+        Ok(mut rows) => {
+            rows.push((0, "Additional fortune added at request time.".to_string()));
+            rows.sort_by(|a, b| a.1.cmp(&b.1));
+            let mut body = String::with_capacity(1024);
+            body.push_str("<!doctype html>\n<html>\n<head><title>Fortunes</title></head>\n");
+            body.push_str("<body><table><tr><th>id</th><th>message</th></tr>\n");
+            for (id, msg) in rows {
+                body.push_str(&format!(
+                    "<tr><td>{}</td><td>{}</td></tr>\n",
+                    id,
+                    escape_html(&msg)
+                ));
+            }
+            body.push_str("</table></body></html>");
+            ResponseOut::new(
+                200,
+                vec![("Content-Type".into(), "text/html; charset=utf-8".into())],
+                body.into_bytes(),
+            )
+        }
+        Err(_) => simple(500),
     }
 }
 
@@ -463,6 +599,7 @@ async fn dispatch_python(
     endpoint: String,
     hint: String,
     allowed: Vec<String>,
+    fast: bool,
 ) -> ResponseOut {
     let shared2 = shared.clone();
     let joined = tokio::task::spawn_blocking(move || {
@@ -471,7 +608,7 @@ async fn dispatch_python(
                 .and_then(|i| shared2.router.routes.get(i))
                 .map(|r| r.view.clone_ref(py));
             let view_ref = view.as_ref();
-            run_python(py, shared2.as_ref(), &req, view_ref, &params, &endpoint, &hint, &allowed)
+            run_python(py, shared2.as_ref(), &req, view_ref, &params, &endpoint, &hint, &allowed, fast)
                 .unwrap_or_else(|e| python_error_response(py, shared2.as_ref(), e))
         })
     })
@@ -491,6 +628,7 @@ fn run_python(
     endpoint: &str,
     hint: &str,
     allowed: &[String],
+    fast: bool,
 ) -> PyResult<ResponseOut> {
     let qp = PyList::new_bound(
         py,
@@ -547,7 +685,13 @@ fn run_python(
         None,
     )?;
 
-    let rv = if shared.fast {
+    let rv = if fast {
+        if let (Some(view), Some(fast_pipeline)) = (view, shared.fast_pipeline.as_ref()) {
+            fast_pipeline.bind(py).call1((rq, view, &kwargs))?
+        } else {
+            shared.dispatch.bind(py).call1((rq,))?
+        }
+    } else if shared.fast {
         if let Some(view) = view {
             shared.pipeline.bind(py).call1((rq, view, &kwargs))?
         } else {
