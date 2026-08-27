@@ -1,0 +1,6 @@
+zan
+flask
+gunicorn[gevent]
+psycopg[binary]
+jinja2
+requests
