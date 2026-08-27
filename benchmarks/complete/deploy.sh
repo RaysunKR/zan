@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+mkdir -p logs
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -28,7 +29,7 @@ pip install -r requirements.txt
 if ! python -c "import _zan" 2>/dev/null; then
     cd ../..
     maturin develop --release
-    cd -
+    cd - >/dev/null
 fi
 
 # 5. init DB
@@ -37,7 +38,7 @@ DATABASE_URL="postgresql://tfb:tfb@localhost:5432/tfb" python init_db.py
 # 6. kill old processes
 pkill -f 'zan_app/app.py' || true
 pkill -f 'zan_app/multi.py' || true
-pkill -f 'flask_app/app:app' || true
+pkill -f 'flask_app.app:app' || true
 sleep 1
 
 # 7. start services
@@ -47,13 +48,19 @@ DATABASE_URL="postgresql://tfb:tfb@localhost:5432/tfb" nohup gunicorn -k gevent 
 
 # 8. wait for readiness
 for port in 7071 7072 7073; do
+    ready=0
     for i in {1..30}; do
         if curl -s "http://127.0.0.1:$port/plaintext" >/dev/null; then
             echo "Port $port ready"
+            ready=1
             break
         fi
         sleep 1
     done
+    if [ "$ready" -ne 1 ]; then
+        echo "ERROR: Port $port did not become ready" >&2
+        exit 1
+    fi
 done
 
 # 9. correctness checks
