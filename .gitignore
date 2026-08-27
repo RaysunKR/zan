@@ -18,3 +18,4 @@ blog/frontend/node_modules/
 # Runtime / generated files
 *.db
 blog/backend/static/
+benchmarks/complete/results/
