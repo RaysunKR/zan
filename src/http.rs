@@ -529,7 +529,11 @@ async fn native_updates(req: &Req) -> ResponseOut {
                 .iter()
                 .map(|(id, _)| (random_world_id(), *id))
                 .collect();
-            if db::update_worlds(updates.clone()).await.is_err() {
+            // Sort by ID before updating so all transactions lock rows in the same
+            // order, eliminating deadlocks under high concurrency.
+            let mut sorted_updates = updates.clone();
+            sorted_updates.sort_by(|a, b| a.1.cmp(&b.1));
+            if db::update_worlds(sorted_updates).await.is_err() {
                 return simple(500);
             }
             let mut body = String::with_capacity(updates.len() * 32 + 2);
