@@ -5,14 +5,17 @@
 //! 同时暴露给 Rust HTTP 处理器的原生异步接口，完全绕过 Python。
 
 use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use deadpool_postgres::{Config, Pool, Runtime};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
+use tokio::sync::Semaphore;
 
 use crate::pyapi::runtime;
 
 static POOL: Mutex<Option<Pool>> = Mutex::new(None);
+static UPDATE_SEM: OnceLock<Semaphore> = OnceLock::new();
 
 fn db_url() -> String {
     std::env::var("DATABASE_URL")
@@ -61,6 +64,21 @@ fn pool() -> Result<Pool, String> {
     Ok(p)
 }
 
+fn update_sem() -> &'static Semaphore {
+    UPDATE_SEM.get_or_init(|| {
+        let permits = std::env::var("ZAN_UPDATE_CONCURRENCY")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(8)
+                    .max(8)
+            });
+        Semaphore::new(permits)
+    })
+}
+
 // ---------------------------------------------------------------------------
 // 核心异步查询（Rust 原生接口）
 // ---------------------------------------------------------------------------
@@ -90,6 +108,10 @@ pub async fn get_worlds(ids: Vec<i32>) -> Result<Vec<(i32, i32)>, String> {
 }
 
 pub async fn update_worlds(rows: Vec<(i32, i32)>) -> Result<(), String> {
+    let _permit = update_sem()
+        .acquire()
+        .await
+        .map_err(|e| format!("update semaphore error: {e}"))?;
     let pool = pool()?;
     let client = pool.get().await.map_err(|e| format!("DB pool error: {e}"))?;
     let ids: Vec<i32> = rows.iter().map(|r| r.1).collect();
