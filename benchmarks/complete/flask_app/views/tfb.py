@@ -8,7 +8,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from flask import Response, request
-from benchmarks.complete.shared.models import get_conn, get_world, update_worlds, get_fortunes
+from benchmarks.complete.shared.models import get_conn, get_world, get_worlds, update_worlds, get_fortunes
 
 FORTUNE_TMPL = """<!doctype html>
 <html><head><title>Fortunes</title></head>
@@ -51,22 +51,19 @@ def register(app):
     def queries_test():
         n = _clamp_queries()
         conn = get_conn()
-        out = []
-        for _ in range(n):
-            row = get_world(conn, random.randint(1, 10000))
-            out.append({"id": row[0], "randomNumber": row[1]})
-        return out
+        ids = [random.randint(1, 10000) for _ in range(n)]
+        rows = get_worlds(conn, ids)
+        return [{"id": row[0], "randomNumber": row[1]} for row in rows]
 
     @app.route("/updates")
     def updates_test():
         n = _clamp_queries()
         conn = get_conn()
-        rows = []
-        for _ in range(n):
-            row = get_world(conn, random.randint(1, 10000))
-            rows.append([random.randint(1, 10000), row[0]])
-        update_worlds(conn, rows)
-        return [{"id": rid, "randomNumber": new} for new, rid in rows]
+        ids = [random.randint(1, 10000) for _ in range(n)]
+        rows = get_worlds(conn, ids)
+        updates = [[random.randint(1, 10000), row[0]] for row in rows]
+        update_worlds(conn, updates)
+        return [{"id": rid, "randomNumber": new} for new, rid in updates]
 
     @app.route("/fortunes")
     def fortunes_test():

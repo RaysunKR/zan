@@ -523,29 +523,29 @@ async fn native_queries(req: &Req) -> ResponseOut {
 async fn native_updates(req: &Req) -> ResponseOut {
     let n = parse_queries(req);
     let ids: Vec<i32> = (0..n).map(|_| random_world_id()).collect();
-    match db::get_worlds(ids).await {
+    // Pair each selected id with a new random number, then sort by id so all
+    // concurrent UPDATE transactions lock rows in the same order.
+    let mut updates: Vec<(i32, i32)> = ids
+        .iter()
+        .map(|id| (random_world_id(), *id))
+        .collect();
+    updates.sort_by(|a, b| a.1.cmp(&b.1));
+    match db::update_worlds_returning(updates).await {
         Ok(rows) => {
-            let updates: Vec<(i32, i32)> = rows
-                .iter()
-                .map(|(id, _)| (random_world_id(), *id))
-                .collect();
-            // Sort by ID before updating so all transactions lock rows in the same
-            // order, eliminating deadlocks under high concurrency.
-            let mut sorted_updates = updates.clone();
-            sorted_updates.sort_by(|a, b| a.1.cmp(&b.1));
-            if db::update_worlds(sorted_updates).await.is_err() {
-                return simple(500);
-            }
-            let mut body = String::with_capacity(updates.len() * 32 + 2);
+            let mut body = String::with_capacity(rows.len() * 32 + 2);
             body.push('[');
-            for (i, (new, id)) in updates.iter().enumerate() {
+            for (i, (id, num)) in rows.iter().enumerate() {
                 if i > 0 {
                     body.push(',');
                 }
-                body.push_str(&format!(r#"{{"id":{},"randomNumber":{}}}"#, id, new));
+                body.push_str(&format!(r#"{{"id":{},"randomNumber":{}}}"#, id, num));
             }
             body.push(']');
-            ResponseOut::new(200, vec![("Content-Type".into(), "application/json".into())], body.into_bytes())
+            ResponseOut::new(
+                200,
+                vec![("Content-Type".into(), "application/json".into())],
+                body.into_bytes(),
+            )
         }
         Err(_) => simple(500),
     }

@@ -29,12 +29,28 @@ def get_world(conn, wid: int):
         return cur.fetchone()
 
 
-def update_worlds(conn, rows: list[tuple[int, int]]):
-    """rows: [(new_random, id), ...]"""
+def get_worlds(conn, wids: list[int]):
+    """Return [(id, randomnumber), ...] ordered like the input list (with duplicates preserved)."""
     with conn.cursor() as cur:
-        cur.executemany(
-            "UPDATE world SET randomnumber = %s WHERE id = %s",
-            rows,
+        cur.execute(
+            "SELECT w.id, w.randomnumber FROM world w "
+            "JOIN unnest(%s::int[]) AS t(id) ON w.id = t.id",
+            (wids,),
+        )
+        return cur.fetchall()
+
+
+def update_worlds(conn, rows: list[tuple[int, int]]):
+    """rows: [(new_random, id), ...]. Sorts by id internally to avoid deadlocks."""
+    sorted_rows = sorted(rows, key=lambda r: r[1])
+    ids = [r[1] for r in sorted_rows]
+    nums = [r[0] for r in sorted_rows]
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE world SET randomnumber = t.num "
+            "FROM (SELECT unnest(%s::int[]) AS num, unnest(%s::int[]) AS id) AS t "
+            "WHERE world.id = t.id",
+            (nums, ids),
         )
     conn.commit()
 

@@ -5,17 +5,14 @@
 //! 同时暴露给 Rust HTTP 处理器的原生异步接口，完全绕过 Python。
 
 use std::sync::Mutex;
-use std::sync::OnceLock;
 
 use deadpool_postgres::{Config, Pool, Runtime};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyTuple};
-use tokio::sync::Semaphore;
 
 use crate::pyapi::runtime;
 
 static POOL: Mutex<Option<Pool>> = Mutex::new(None);
-static UPDATE_SEM: OnceLock<Semaphore> = OnceLock::new();
 
 fn db_url() -> String {
     std::env::var("DATABASE_URL")
@@ -64,21 +61,6 @@ fn pool() -> Result<Pool, String> {
     Ok(p)
 }
 
-fn update_sem() -> &'static Semaphore {
-    UPDATE_SEM.get_or_init(|| {
-        let permits = std::env::var("ZAN_UPDATE_CONCURRENCY")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(|| {
-                std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(8)
-                    .max(8)
-            });
-        Semaphore::new(permits)
-    })
-}
-
 // ---------------------------------------------------------------------------
 // 核心异步查询（Rust 原生接口）
 // ---------------------------------------------------------------------------
@@ -108,10 +90,6 @@ pub async fn get_worlds(ids: Vec<i32>) -> Result<Vec<(i32, i32)>, String> {
 }
 
 pub async fn update_worlds(rows: Vec<(i32, i32)>) -> Result<(), String> {
-    let _permit = update_sem()
-        .acquire()
-        .await
-        .map_err(|e| format!("update semaphore error: {e}"))?;
     let pool = pool()?;
     let client = pool.get().await.map_err(|e| format!("DB pool error: {e}"))?;
     let ids: Vec<i32> = rows.iter().map(|r| r.1).collect();
@@ -124,6 +102,23 @@ pub async fn update_worlds(rows: Vec<(i32, i32)>) -> Result<(), String> {
         .await
         .map_err(|e| format!("DB update error: {e}"))?;
     Ok(())
+}
+
+/// Update rows and return the new `(id, randomnumber)` pairs in a single round-trip.
+/// Input rows must already be sorted by id for deadlock-free execution.
+pub async fn update_worlds_returning(rows: Vec<(i32, i32)>) -> Result<Vec<(i32, i32)>, String> {
+    let pool = pool()?;
+    let client = pool.get().await.map_err(|e| format!("DB pool error: {e}"))?;
+    let ids: Vec<i32> = rows.iter().map(|r| r.1).collect();
+    let new_nums: Vec<i32> = rows.iter().map(|r| r.0).collect();
+    let updated = client
+        .query(
+            "UPDATE world SET randomnumber = t.num FROM (SELECT unnest($1::int[]) AS num, unnest($2::int[]) AS id) AS t WHERE world.id = t.id RETURNING world.id, world.randomnumber",
+            &[&new_nums, &ids],
+        )
+        .await
+        .map_err(|e| format!("DB update error: {e}"))?;
+    Ok(updated.into_iter().map(|r| (r.get(0), r.get(1))).collect())
 }
 
 pub async fn get_fortunes() -> Result<Vec<(i32, String)>, String> {

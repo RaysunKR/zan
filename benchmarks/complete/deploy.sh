@@ -42,8 +42,8 @@ pkill -f 'flask_app.app:app' || true
 sleep 1
 
 # 7. start services
-DATABASE_URL="postgresql://tfb:tfb@localhost:5432/tfb" ZAN_DB_POOL_SIZE=32 ZAN_UPDATE_CONCURRENCY=16 PORT=7071 nohup python zan_app/app.py > logs/zan.log 2>&1 &
-DATABASE_URL="postgresql://tfb:tfb@localhost:5432/tfb" PORT=7073 nohup python zan_app/multi.py > logs/zan_multi.log 2>&1 &
+DATABASE_URL="postgresql://tfb:tfb@localhost:5432/tfb" ZAN_DB_POOL_SIZE=64 PORT=7071 nohup python zan_app/app.py > logs/zan.log 2>&1 &
+DATABASE_URL="postgresql://tfb:tfb@localhost:5432/tfb" ZAN_DB_POOL_SIZE=16 PORT=7073 nohup python zan_app/multi.py > logs/zan_multi.log 2>&1 &
 DATABASE_URL="postgresql://tfb:tfb@localhost:5432/tfb" nohup gunicorn -k gevent -w $((2 * $(nproc) + 1)) -b 0.0.0.0:7072 flask_app.app:app > logs/flask.log 2>&1 &
 
 # 8. wait for readiness
