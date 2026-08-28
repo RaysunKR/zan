@@ -91,7 +91,7 @@ pytest tests/ -q
 
 ## 性能
 
-同机对比（Windows、Python 3.13、8 keep-alive 连接、纯 Python 视图函数）：
+### 本地微基准（Windows、Python 3.13、8 keep-alive 连接、纯 Python 视图函数）
 
 | 场景 | zan | Flask dev server | 加速 |
 | --- | --- | --- | --- |
@@ -100,17 +100,33 @@ pytest tests/ -q
 | 路由参数 | 3077 req/s | 419 req/s | **7.4x** |
 | POST JSON | 2375 req/s | 422 req/s | **5.6x** |
 
-**TechEmpower 标准测试**（六类规范端点，单连接串行，Flask 侧 waitress）：
+### TechEmpower 标准测试
 
-| 测试 | zan | Flask | 加速 |
-| --- | ---: | ---: | ---: |
-| plaintext | 1,150 req/s | 199 req/s | **5.8x** |
-| json | 1,077 req/s | 232 req/s | **4.6x** |
-| db / queries / fortunes | — | — | 1.1–1.2x（SQLite 主导） |
+在 Ubuntu 服务器（8 核、PostgreSQL 16）上跑六类规范端点（`/plaintext`、`/json`、`/db`、`/queries`、`/updates`、`/fortunes`），严格按 TechEmpower wrk 方法：256 连接、每轮 15 秒、取 3 轮中位数。Flask 侧使用 gunicorn + gevent。zan 对 DB 端点启用 Rust 原生处理器，应用层代码无需改动。
+
+| 测试 | zan | flask | zan_multi | zan 相比 flask |
+| --- | ---: | ---: | ---: | ---: |
+| plaintext | 65 141 | 40 372 | 98 613 | 1.6x |
+| json | 67 144 | 37 966 | 110 427 | 1.8x |
+| db | 43 937 | 15 122 | 40 832 | 2.9x |
+| queries | 36 587 | 11 377 | 29 150 | 3.2x |
+| updates | 16 614 | 4 297 | 13 909 | 3.9x |
+| fortunes | 43 108 | 14 270 | 40 519 | 3.0x |
+
+zan 所有端点均以 0 错误完成测试。DB 类指标受 PostgreSQL 单机吞吐限制。
 
 多核：`run(processes=N)` 突破 GIL，CPU 密集视图近似线性扩展（2 核实测 1.9x）。
 
-复现：`python benchmarks/bench_keepalive.py`（keep-alive）、`benchmarks/tfb/harness2.py`（TechEmpower，方法与局限见 `benchmarks/tfb/results.md`）、`benchmarks/bench_multiprocess2.py`（多核）。注意 Flask dev server（Werkzeug）本身未开 keep-alive，此对比对两者使用同一客户端与负载。
+复现方式：
+
+```bash
+cd benchmarks/complete
+bash deploy.sh        # 安装依赖、编译 zan、启动服务
+bash benchmark.sh     # 运行 wrk，结果写入 results/<时间戳>
+python3 report.py results/<时间戳>
+```
+
+注意 Flask dev server（Werkzeug）本身未开 keep-alive，本地微基准对两者使用同一客户端与负载。
 
 ## 架构
 

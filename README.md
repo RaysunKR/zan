@@ -112,7 +112,7 @@ Known differences (intentional or not yet implemented):
 
 ## Performance
 
-Local comparison on Windows, Python 3.13, 8 keep-alive connections, pure Python view functions:
+### Local micro-benchmark (Windows, Python 3.13, 8 keep-alive connections, pure Python views)
 
 | Scenario | zan | Flask dev server | Speedup |
 | --- | --- | --- | --- |
@@ -121,17 +121,33 @@ Local comparison on Windows, Python 3.13, 8 keep-alive connections, pure Python 
 | Route params | 3077 req/s | 419 req/s | **7.4x** |
 | POST JSON | 2375 req/s | 422 req/s | **5.6x** |
 
-**TechEmpower-style benchmark** (six canonical endpoints, single connection, Flask side served by waitress):
+### TechEmpower-style benchmark
 
-| Test | zan | Flask | Speedup |
-| --- | ---: | ---: | ---: |
-| plaintext | 1,150 req/s | 199 req/s | **5.8x** |
-| json | 1,077 req/s | 232 req/s | **4.6x** |
-| db / queries / fortunes | — | — | 1.1–1.2x (SQLite-bound) |
+Six canonical endpoints (`/plaintext`, `/json`, `/db`, `/queries`, `/updates`, `/fortunes`) on an Ubuntu server (8 cores, PostgreSQL 16), strict TechEmpower wrk methodology: 256 connections, 15 s per round, median of 3 rounds. Flask served by gunicorn + gevent. zan uses native Rust handlers for the DB endpoints with no API change to application code.
+
+| Test | zan | flask | zan_multi | zan vs flask |
+| --- | ---: | ---: | ---: | ---: |
+| plaintext | 65 141 | 40 372 | 98 613 | 1.6x |
+| json | 67 144 | 37 966 | 110 427 | 1.8x |
+| db | 43 937 | 15 122 | 40 832 | 2.9x |
+| queries | 36 587 | 11 377 | 29 150 | 3.2x |
+| updates | 16 614 | 4 297 | 13 909 | 3.9x |
+| fortunes | 43 108 | 14 270 | 40 519 | 3.0x |
+
+All zan endpoints completed the benchmark with zero socket/read/write/timeout errors. DB-bound numbers are constrained by PostgreSQL single-machine throughput.
 
 Multi-core: `run(processes=N)` breaks through the GIL; CPU-bound views scale almost linearly (2 cores measured at ~1.9x).
 
-To reproduce: `python benchmarks/bench_keepalive.py` (keep-alive), `benchmarks/tfb/harness2.py` (TechEmpower, methodology and limitations in `benchmarks/tfb/results.md`), and `benchmarks/bench_multiprocess2.py` (multi-core). Note that the Flask dev server (Werkzeug) does not enable keep-alive by default; both frameworks were measured with the same client and workload.
+To reproduce:
+
+```bash
+cd benchmarks/complete
+bash deploy.sh        # installs deps, builds zan, starts services
+bash benchmark.sh     # runs wrk and writes results/<timestamp>
+python3 report.py results/<timestamp>
+```
+
+Note that the Flask dev server (Werkzeug) does not enable keep-alive by default; the local micro-benchmark uses the same client and workload for both frameworks.
 
 ## Architecture
 
